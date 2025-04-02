@@ -6,13 +6,11 @@ the code for cross-modal saliency for the immersive videos
      The multi-modal saliency database  can be downloaded for xx.
      The directory structure of the dataset is as follow.
 <pre>
-└── MVS  
-    ├── Video-Number  
-    │   ├── fixation_maps  
-    │   ├── fixations  
-    │   ├── frames  
-    │   ├── saliency_maps  
-└── video2frame.py
+└── the multi-modal saliency dataset
+    ├── saliency
+    ├── fixation  
+    ├── video_frames  
+    ├── the original videos
 </pre>
 
    
