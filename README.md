@@ -13,5 +13,7 @@ The directory structure of the dataset is as follow.
     ├── video_frames  
     ├── the original videos
 </pre>
+**2. The training and  testing code**
 
-   
+''' bash
+ python main_nowandb.py
