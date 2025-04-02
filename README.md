@@ -19,5 +19,6 @@ The directory structure of the dataset is as follow.
  **if you want to train the model, you need to download the dataset and specify the address of the traing set, then execute the following  instruction
 ```python
  python main_nowandb.py
+
 ** if you want to test the pretrained model, you just need to note the training section in the 'main_nowandb.py'.
 The predict.py  will generate the saliency map and the evaluation_saliencymap.py will calculate the different evaluation metrics and save them as an excel file.
