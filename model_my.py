@@ -22,15 +22,39 @@ class Gate(nn.Module):
         return gate_fea
 
 
-'''视频编码模型'''
+class FusionNetwork(nn.Module):
+    def __init__(self):
+        super(FusionNetwork, self).__init__()
+        # 定义卷积层，保持输入和输出的通道数一致
+        # 用来音视融合和触视融合之后将两个融合特征进行合并
+        # 其输入是四个融合之后的视触特征和四个融合之后的视听特征
+        self.conv1 = nn.Conv3d(96, 96, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv3d(192, 192, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv3d(384, 384, kernel_size=3, stride=1, padding=1)
+        self.conv4 = nn.Conv3d(768, 768, kernel_size=3, stride=1, padding=1)
 
+    def forward(self, h1, h2, h3, h4, a1, a2, a3, a4):
+        # 通道维度相加
+        f1 = h1 + a1
+        f2 = h2 + a2
+        f3 = h3 + a3
+        f4 = h4 + a4
+
+        # 通过卷积层
+        y1 = self.conv1(f1)
+        y2 = self.conv2(f2)
+        y3 = self.conv3(f3)
+        y4 = self.conv4(f4)
+
+        return y1, y2, y3, y4
+
+'''视频编码模型'''
 class VideoSaliencyModel(nn.Module):
     def __init__(self, pretrain=None):
         super(VideoSaliencyModel, self).__init__()
 
         self.backbone = SwinTransformer3D(pretrained=pretrain)
         self.decoder = DecoderConvUp()
-
     def forward(self, x):
         x, [y1, y2, y3, y4] = self.backbone(x)
         #print('第一到第三阶段的shape', y1.shape, y2.shape, y3.shape, y4.shape)
@@ -40,7 +64,6 @@ class VideoSaliencyModel(nn.Module):
 
 
 '''触觉编码模型'''
-
 class TimeSeriesTransformer(nn.Module):
     def __init__(self, input_dim=3200, model_dim=256, feature_dim=128, n_heads=8, n_layers = 4, dropout=0.1):
         """
@@ -134,7 +157,6 @@ class AffineTransform(nn.Module):
         self.fc_layers = nn.ModuleList([
             nn.Linear(input_dim, shape[0]) for shape in self.target_shapes  # 映射到目标通道数 C
         ])
-
     def forward(self, x):
         """
         前向传播
@@ -162,7 +184,7 @@ class AffineTransform(nn.Module):
 
 
 
-
+'''联合视触觉的编码模型'''
 class Video_HAPTIC_SaliencyModel(nn.Module):
     def __init__(self, pretrain=None):
         super(Video_HAPTIC_SaliencyModel, self).__init__()
@@ -189,8 +211,95 @@ class Video_HAPTIC_SaliencyModel(nn.Module):
         # print('fusion_3.shape', fusion_3.shape)
         # print('fusion_4.shape', fusion_4.shape)
         out = self.decoder (fusion_4, fusion_3, fusion_2, fusion_1)
+        return out
+        #return  fusion_4, fusion_3, fusion_2, fusion_1
+
+class Video_Audio_SaliencyModel(nn.Module):
+    def __init__(self, pretrain=None):
+        super(Video_Audio_SaliencyModel, self).__init__()
+
+        self.backbone = SwinTransformer3D(pretrained=pretrain)
+        self.fusion_1 = cross_attetion_fusion(96)
+        self.fusion_2 = cross_attetion_fusion(192)
+        self.fusion_3 = cross_attetion_fusion(384)
+        self.fusion_4 = cross_attetion_fusion(768)
+
+        self.decoder = Decoder_pyramid()
+
+    def forward(self, visual, audio_1, audio_2, audio_3, audio_4):
+        x, [y1, y2, y3, y4] = self.backbone(visual)
+        print('第一到第三阶段的shape', y1.shape, y2.shape, y3.shape,
+              y4.shape)  # [2,96,8,56,96] [2,192,8,28,48] [2,384,8,14,24] [2,768,8,7,12]--1.13日确认无误的
+
+        # print('第一到第三阶段的shape', y1.shape, y2.shape, y3.shape, y4.shape)
+        # print('第四阶段的输出, 即x的shape', x.shape)
+        fusion_1 = self.fusion_1(audio_1, y1)
+        fusion_2 = self.fusion_2(audio_2, y2)
+        fusion_3 = self.fusion_3(audio_3, y3)
+        fusion_4 = self.fusion_4(audio_4, x)
+        # print('fusion_1.shape', fusion_1.shape)
+        # print('fusion_2.shape', fusion_2.shape)
+        # print('fusion_3.shape', fusion_3.shape)
+        # print('fusion_4.shape', fusion_4.shape)
+        out = self.decoder(fusion_4, fusion_3, fusion_2, fusion_1)
 
         return out
+
+
+
+class Video_Audio_Haptic_SaliencyModel(nn.Module):
+    def __init__(self, pretrain=None):
+        super(Video_Audio_Haptic_SaliencyModel, self).__init__()
+        '''三个模态的融合和解码生成网络'''
+        self.backbone = SwinTransformer3D(pretrained=pretrain)
+        '''视觉和听觉的融合'''
+        self.fusionVA_1 = cross_attetion_fusion(96)
+        self.fusionVA_2 = cross_attetion_fusion(192)
+        self.fusionVA_3 = cross_attetion_fusion(384)
+        self.fusionVA_4 = cross_attetion_fusion(768)
+        '''视觉和触觉的融合'''
+        self.fusionVH_1 = cross_attetion_fusion(96)
+        self.fusionVH_2 = cross_attetion_fusion(192)
+        self.fusionVH_3 = cross_attetion_fusion(384)
+        self.fusionVH_4 = cross_attetion_fusion(768)
+
+        '''将得到的两个特征融合'''
+        self.cmf_fusion = FusionNetwork()
+
+        '''金字塔的解码网络'''
+        self.decoder = Decoder_pyramid()
+
+    def forward(self, visual,  audio_1, audio_2, audio_3, audio_4, haptic_1, haptic_2, haptic_3, haptic_4):
+        x, [y1, y2, y3, y4] = self.backbone(visual)
+        print('第一到第三阶段的shape', y1.shape, y2.shape, y3.shape,
+              y4.shape)  # [2,96,8,56,96] [2,192,8,28,48] [2,384,8,14,24] [2,768,8,7,12]--1.13日确认无误的
+
+        # print('第一到第三阶段的shape', y1.shape, y2.shape, y3.shape, y4.shape)
+        # print('第四阶段的输出, 即x的shape', x.shape)
+        fusionVA_1 = self.fusionVA_1(audio_1, y1)
+        fusionVA_2 = self.fusionVA_2(audio_2, y2)
+        fusionVA_3 = self.fusionVA_3(audio_3, y3)
+        fusionVA_4 = self.fusionVA_4(audio_4, x)
+
+
+        fusionVH_1 = self.fusionVH_1(haptic_1, y1)
+        fusionVH_2 = self.fusionVH_2(haptic_2, y2)
+        fusionVH_3 = self.fusionVH_3(haptic_3, y3)
+        fusionVH_4 = self.fusionVH_4(haptic_4, x)
+
+        fusion_1, fusion_2, fusion_3, fusion_4 = self.cmf_fusion(fusionVH_1, fusionVH_2, fusionVH_3, fusionVH_4,fusionVA_1, fusionVA_2, fusionVA_3, fusionVA_4)
+        out = self.decoder(fusion_4, fusion_3, fusion_2, fusion_1)
+
+        return out
+
+
+
+
+
+
+
+
+
 
 class PrintLayer(nn.Module):
     def forward(self, x):
@@ -540,11 +649,139 @@ class cross_attetion_fusion(nn.Module):
 #     def __init__(self):
 
 
+'''音频编码网络'''
+class SoundNet(nn.Module):
+    def __init__(self):
+        super(SoundNet, self).__init__()
+
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=(64, 1), stride=(2, 1),
+                               padding=(32, 0))
+        self.batchnorm1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.relu1 = nn.ReLU(True)
+        self.maxpool1 = nn.MaxPool2d((8, 1), stride=(8, 1))
+
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=(32, 1), stride=(2, 1),
+                               padding=(16, 0))
+        self.batchnorm2 = nn.BatchNorm2d(32, eps=1e-5, momentum=0.1)
+        self.relu2 = nn.ReLU(True)
+        self.maxpool2 = nn.MaxPool2d((8, 1), stride=(8, 1))
+
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=(16, 1), stride=(2, 1),
+                               padding=(8, 0))
+        self.batchnorm3 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.relu3 = nn.ReLU(True)
+
+        self.conv4 = nn.Conv2d(64, 128, kernel_size=(8, 1), stride=(2, 1),
+                               padding=(4, 0))
+        self.batchnorm4 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.relu4 = nn.ReLU(True)
+
+        self.conv5 = nn.Conv2d(128, 256, kernel_size=(4, 1), stride=(2, 1),
+                               padding=(2, 0))
+        self.batchnorm5 = nn.BatchNorm2d(256, eps=1e-5, momentum=0.1)
+        self.relu5 = nn.ReLU(True)
+        self.maxpool5 = nn.MaxPool2d((4, 1), stride=(4, 1))
+
+        self.conv6 = nn.Conv2d(256, 512, kernel_size=(4, 1), stride=(2, 1),
+                               padding=(2, 0))
+        self.batchnorm6 = nn.BatchNorm2d(512, eps=1e-5, momentum=0.1)
+        self.relu6 = nn.ReLU(True)
+
+        self.conv7 = nn.Conv2d(512, 1024, kernel_size=(4, 1), stride=(2, 1),
+                               padding=(2, 0))
+        self.batchnorm7 = nn.BatchNorm2d(1024, eps=1e-5, momentum=0.1)
+        self.relu7 = nn.ReLU(True)
+
+        self.conv8_objs = nn.Conv2d(1024, 1000, kernel_size=(8, 1),
+                                    stride=(2, 1))
+        self.conv8_scns = nn.Conv2d(1024, 401, kernel_size=(8, 1),
+                                    stride=(2, 1))
+
+    def forward(self, waveform):
+        x = self.conv1(waveform)
+        x = self.batchnorm1(x)
+        x = self.relu1(x)
+        x = self.maxpool1(x)
+
+        x = self.conv2(x)
+        x = self.batchnorm2(x)
+        x = self.relu2(x)
+        x = self.maxpool2(x)
+
+        x = self.conv3(x)
+        x = self.batchnorm3(x)
+        x = self.relu3(x)
+
+        x = self.conv4(x)
+        x = self.batchnorm4(x)
+        x = self.relu4(x)
+
+        x = self.conv5(x)
+        x = self.batchnorm5(x)
+        x = self.relu5(x)
+        x = self.maxpool5(x)
+
+        x = self.conv6(x)
+        x = self.batchnorm6(x)
+        x = self.relu6(x)
+
+        x = self.conv7(x)
+        x = self.batchnorm7(x)
+        x = self.relu7(x)
+
+        return x
+
+
+import torch
+from torch import nn
+
 
 
 
 if __name__ == '__main__':
 
+    '''测试音频编码网络'''
+    a = torch.rand(2,1,64,1200)
+    model = SoundNet()
+    out = model(a)
+    print(out.shape)  # torch.Size([2, 1024, 1, 75])
+    exit()
+
+
+    '''测试音视触的融合网络'''
+    v = torch.rand(2, 3, 16, 224, 384)
+    a1 = torch.rand(2, 96, 8, 56, 96)
+    a2 = torch.rand(2, 192, 8, 28, 48)
+    a3= torch.rand(2, 384, 8, 14, 24)
+    a4 = torch.rand(2, 768, 8, 7, 12)
+
+    h1 = torch.rand(2, 96, 8, 56, 96)
+    h2 = torch.rand(2, 192, 8, 28, 48)
+    h3 = torch.rand(2, 384, 8, 14, 24)
+    h4 = torch.rand(2, 768, 8, 7, 12)
+
+    model = Video_Audio_Haptic_SaliencyModel()
+    out = model(v, a1, a2, a3, a4, h1, h2, h3, h4)
+    print(out.shape)
+
+    h1 = torch.rand(10, 96, 8, 56, 96)
+    h2 = torch.rand(10, 192, 8, 28, 48)
+    h3 = torch.rand(10, 384, 8, 14, 24)
+    h4 = torch.rand(10, 768, 8, 7, 12)
+
+    a1 = torch.rand(10, 96, 8, 56, 96)
+    a2 = torch.rand(10, 192, 8, 28, 48)
+    a3 = torch.rand(10, 384, 8, 14, 24)
+    a4 = torch.rand(10, 768, 8, 7, 12)
+    model = FusionNetwork()
+    y1, y2, y3, y4 = model(h1, h2, h3, h4, a1, a2, a3, a4)
+
+    print(y1.shape)  # torch.Size([10, 96, 8, 56, 96])
+    print(y2.shape)  # torch.Size([10, 192, 8, 28, 48])
+    print(y3.shape)  # torch.Size([10, 384, 8, 14, 24])
+    print(y4.shape)  # torch.Size([10, 768, 8, 7, 12])
+
+    exit()
     y1 = torch.rand(10, 96, 8, 56, 96)
     y2 = torch.rand(10, 192, 8, 28, 48)
     y3 = torch.rand(10, 384, 8, 14, 24)
