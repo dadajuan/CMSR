@@ -4,7 +4,7 @@ the code for cross-modal saliency for the immersive videos
 
 **1. Download dataset**
 ***
-The multi-modal saliency database  can be downloaded from [BaiduWangPan](https://pan.baidu.com/s/1_mDCmgrvUw_3uN49NJ8nVA?pwd=xf7g).
+The multi-modal saliency database  can be downloaded from [BaiduWangPan](https://pan.baidu.com/s/1_mDCmgrvUw_3uN49NJ8nVA?pwd=xf7g) or Gooloedrive（https://drive.google.com/file/d/1FGL1dfdoXKOGgyTi1ABiRTMK8cik0KyA/view?usp=drive_link）.
 The directory structure of the dataset is as follow.
 <pre>
 └── the multi-modal saliency dataset
