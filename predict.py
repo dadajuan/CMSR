@@ -8,17 +8,21 @@ from PIL import Image
 from utils.process_video_audio_new import LoadVideoAudio
 
 from model_predi import DAVE
-from model_my import Video_HAPTIC_SaliencyModel, AffineTransform, TimeSeriesTransformer, haptic_encoder_fenlei
+
+from model_my import Video_HAPTIC_SaliencyModel, AffineTransform, TimeSeriesTransformer, Video_Audio_SaliencyModel, AffineTransform_Audio, Encoder_Auido_sound, Video_Audio_Haptic_SaliencyModel, Encoder_Auido_sound_2
 import pdb
 import matplotlib.pyplot as plt
 import cv2
 
 
+# 测试集的地址
 VIDEO_TEST_FOLDER = r'/data1/liuhengfa/my_own_code_for_saliency/data/video0_renamed/test_4'
 
 
 '''这个是生成的显著性图的地址'''
-OUTPUT = '/data1/liuhengfa/my_own_code_for_saliency/test_for_tuning_old_dataset/output_dataset_test14/test_4_test'
+#OUTPUT = '/data1/liuhengfa/my_own_code_for_saliency/test_for_tuning_old_dataset/output_dataset_test14/test_4_test'
+OUTPUT = '/data1/liuhengfa/my_own_code_for_saliency/test_for_tuning_old_dataset_v_a_h/output_dataset_test14/test_4_test'
+
 if not os.path.exists(OUTPUT):
     os.makedirs(OUTPUT)
 # where tofind the model weights
@@ -32,15 +36,16 @@ TRG_WIDTH = 32
 TRG_HIGHT = 40
 
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 def load_model_parameters(model, path):
     model.load_state_dict(torch.load(path))
     model.eval()
     return model
+
 class PredictSaliency(object):
 
-    def __init__(self, model_path, model_path_haptic_encoder,  model_path_haptic_affine):
+    def __init__(self, model_path,  model_path_audio_encoder, model_path_audio_affine, model_path_haptic_encoder,  model_path_haptic_affine):
         super(PredictSaliency, self).__init__()
 
         self.video_list = [os.path.join(VIDEO_TEST_FOLDER, p) for p in os.listdir(VIDEO_TEST_FOLDER)]
@@ -55,7 +60,8 @@ class PredictSaliency(object):
         # self.model.eval()
 
 
-        self.model = Video_HAPTIC_SaliencyModel()
+        #self.model = Video_HAPTIC_SaliencyModel()
+        self.model = Video_Audio_Haptic_SaliencyModel()
         self.model = torch.load(model_path)
         self.output = OUTPUT
         if not os.path.exists(self.output):
@@ -63,13 +69,27 @@ class PredictSaliency(object):
         self.model = self.model.to(device)
         self.model.eval()
 
-        '''两种触觉编码方案'''
+
+        '''触觉编码方案'''
         # 方案1
         self.haptic_encoder = TimeSeriesTransformer()
+        self.haptic_encoder = torch.load(model_path_haptic_encoder)
         self.haptic_encoder = self.haptic_encoder.to(device)
         self.haptic_encoder.eval()
 
 
+        '''听觉编码方案'''
+        self.audio_encoder = Encoder_Auido_sound_2()
+        self.audio_encoder = torch.load(model_path_audio_encoder)
+        self.audio_encoder = self.audio_encoder.to(device)
+        self.audio_encoder.eval()
+
+        # 方案2
+        # self.haptic_encoder_resnet = haptic_encoder_fenlei(3200)
+        # self.haptic_encoder_resnet = torch.load(model_path_haptic_encoder)
+        # self.haptic_encoder = self.haptic_encoder_resnet.cuda()
+        # self.haptic_encoder.eval()
+        # self.haptic_encoder = self.haptic_encoder_resnet.to(device)
 
         '''加载触觉的仿射变换模型'''
 
@@ -78,6 +98,12 @@ class PredictSaliency(object):
         self.model_haptic_affine = self.model_haptic_affine.to(device)
         self.model_haptic_affine.eval()
 
+
+        '''加载听觉的仿射变换模型'''
+        self.model_audio_affine = AffineTransform_Audio()
+        self.model_audio_affine = torch.load(model_path_audio_affine)
+        self.model_audio_affine = self.model_audio_affine.to(device)
+        self.model_audio_affine.eval()
 
 
     @staticmethod
@@ -126,7 +152,7 @@ class PredictSaliency(object):
         for idx in range(len(video_loader)):
 
 
-            video_data_equi, video_data_cube, audio_data= next(vit)
+            video_data_equi, video_data_cube, audio_data, haptic_data = next(vit)
             # video_data_equi, video_data_cube, audio_data = next(vit)           # video_data_equi = [3, 16, 256, 512], video_data_cube = [6, 3, 16, 128, 128], audio_data = [3, 16, 64, 64], AEM_data = [1, 8, 16]
             print(idx, len(video_loader))
            
@@ -150,33 +176,42 @@ class PredictSaliency(object):
             '''方案1--当触觉是使用transformer进行编辑的时候'''
 
             audio_data = audio_data.float().to(device=device)
-            haptic_data = self.haptic_encoder(audio_data)
-
-            '''方案2--当触觉是使用resnet进行编辑的时候'''
-            # audio_data = audio_data.float().cuda()
-            # audio_data_last_time = audio_data[:, -1, :]
-            # haptic_data = self.haptic_encoder.penultimate_layer_output(audio_data_last_time)
-
-            print('xxxxx---编码的触觉的特征的维度--xxxxx', haptic_data.shape)
+            audio_feature = self.audio_encoder(audio_data)  # 这里其实已经是加载的txt的触觉信号了，只是名字没改格式是[b, T, 3200]
 
 
+            haptic_data = haptic_data.float().to(device=device)
+            haptic_data = self.haptic_encoder(haptic_data)
+
+
+            print('xxxxx---编码的音频的特征的维度--xxxxx', audio_data.shape)
+
+
+            audio_out1, audio_out2, audio_out3, audio_out4 = self.model_audio_affine(audio_feature)
+            print('audio_out1, audio_out2, audio_out3, audio_out4', audio_out1.shape, audio_out2.shape, audio_out3.shape, audio_out4.shape)
 
 
             haptic_out1, haptic_out2, haptic_out3, haptic_out4 = self.model_haptic_affine(haptic_data)
             print('haptic_out1, haptic_out2, haptic_out3, haptic_out4', haptic_out1.shape, haptic_out2.shape, haptic_out3.shape, haptic_out4.shape)
 
 
+
+
             # 预测显著图
-            prediction = self.model(video_data_equi,  haptic_out1, haptic_out2, haptic_out3, haptic_out4)
+            #prediction = self.model(video_data_equi,  haptic_out1, haptic_out2, haptic_out3, haptic_out4)
 
+            prediction = self.model(video_data_equi, audio_out1, audio_out2, audio_out3, audio_out4, haptic_out1, haptic_out2, haptic_out3, haptic_out4)
 
+            # prediction = self.model(video_data_equi, video_data_cube, equator_bias)
+
+            # # 打印预测结果的尺寸
+            # print("Prediction size:", prediction.size())
 
             saliency = prediction.cpu().data.numpy()
             saliency = np.squeeze(saliency)
             saliency = (saliency - saliency.min()) / (saliency.max() - saliency.min())
             saliency = Image.fromarray((saliency*255).astype(np.uint8))
             print('before resize----saliency,shape:', saliency.size)
-
+            #saliency = saliency.resize((640, 320), Image.ANTIALIAS)#(640, 480)
             saliency = saliency.resize((384, 224), Image.LANCZOS)
             saliency.save('{}/{}.jpg'.format(out_path, idx+1), 'JPEG')
             print('成功保存显著图')
@@ -192,7 +227,9 @@ class PredictSaliency(object):
             print(v)
             sample_rate = 29.970030  # 默认采样率，根据需要更改
             bname = os.path.basename(v).split('.')[0]
-
+            # print('bname', bname)
+            # sample_rate = int(v[-2:])
+            # bname = os.path.basename(v[:-3])
             output_path = os.path.join(self.output, bname)
             if not os.path.exists(output_path):
                 os.mkdir(output_path)
@@ -203,4 +240,11 @@ class PredictSaliency(object):
 if __name__ == '__main__':
     print('''*****------开始预测------*****''')
     p = PredictSaliency()
+    # predict all sequences
     p.predict_sequences()
+    # alternatively one can call directy for one video
+    #p.predict(VIDEO_TO_LOAD, FPS, SAVE_FOLDER) # the second argument is the video FPS.
+    # MODEL_PATH = f'F:\\AVS360\\new\\AVS360\\output\\test_4_testDAVE_ep30.pkl'
+    # p = PredictSaliency(MODEL_PATH)
+    # # predict all sequences
+    # p.predict_sequences()

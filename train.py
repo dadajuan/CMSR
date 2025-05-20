@@ -10,7 +10,7 @@ from utils.process_video_audio_new import LoadVideoAudio_TRAIN
 
 from model_train import DAVE
 
-from model_my import Video_HAPTIC_SaliencyModel, AffineTransform, TimeSeriesTransformer, haptic_encoder_fenlei
+from model_my import Video_HAPTIC_SaliencyModel, AffineTransform, TimeSeriesTransformer, Video_Audio_SaliencyModel, AffineTransform_Audio, Encoder_Auido_sound, Video_Audio_Haptic_SaliencyModel,Encoder_Auido_sound_2
 import pdb
 import matplotlib.pyplot as plt
 import time
@@ -37,7 +37,7 @@ from loss_function_my import kldiv, cc_score, nss_score
 VIDEO_TRAIN_FOLDER = r'/data1/liuhengfa/my_own_code_for_saliency/data/video0_renamed/train_14'
 
 # 这个是保存模型的路径，后面的main_wanndb也要跟着改变的,即最后加载模型的部分；
-OUTPUT = r'/data1/liuhengfa/my_own_code_for_saliency/test_for_tuning_old_dataset/save_model_dataset/test_4'
+OUTPUT = r'/data1/liuhengfa/my_own_code_for_saliency/test_for_tuning_old_dataset_v_a_h/save_model_dataset/test_14'
 
 
 
@@ -52,14 +52,15 @@ IMG_HIGHT = 320
 TRG_WIDTH = 32
 TRG_HIGHT = 40
 
-device = torch.device("cuda:2")
+device = torch.device("cuda:3")
 
 # 损失函数
 loss_function = nn.KLDivLoss()
 loss_function_bce = nn.BCELoss()
 
 
-viusal_encoder_path = '/data1/xiaozhou_new/swin_small_patch244_window877_kinetics400_1k.pth'
+viusal_encoder_path = '/data1/liuhengfa/my_own_code_for_saliency/AVS360_audiovisual_saliency_360-master_new/xiaozhou_new/swin_small_patch244_window877_kinetics400_1k.pth'
+audio_sound_path = '/data1/liuhengfa/my_own_code_for_saliency/test_for_tuning_old_dataset_v_a_h/AVS360_audiovisual_saliency_360-master_new/xiaozhou_new/swin_small_patch244_window877_kinetics400_1k.pth'
 
 
 
@@ -86,9 +87,14 @@ class TrainSaliency(object):
 
         # 加载模型
         #self.model = DAVE()
-        self.model_2 = Video_HAPTIC_SaliencyModel(pretrain=viusal_encoder_path)
-        self.model_2 = self.model_2.to(device)
+        # self.model_2 = Video_HAPTIC_SaliencyModel(pretrain=viusal_encoder_path)
+        # self.model_2 = self.model_2.to(device)
 
+        # self.model_2 = Video_Audio_SaliencyModel(pretrain=viusal_encoder_path)
+        # self.model_2 = self.model_2.to(device)
+
+        self.model_2 = Video_Audio_Haptic_SaliencyModel(pretrain=viusal_encoder_path)
+        self.model_2 = self.model_2.to(device)
 
         '''触觉编码网络的两种选择，一种是transformer编码时序模型，一种是resnet仅编码最后一帧'''
 
@@ -103,9 +109,26 @@ class TrainSaliency(object):
         self.haptic_encoder = TimeSeriesTransformer()
         self.haptic_encoder = self.haptic_encoder.to(device)
 
+        self.audio_encoder = Encoder_Auido_sound_2(pretrain_path=audio_sound_path)
+        self.audio_encoder = self.audio_encoder.to(device)
+
+
+        # 方案2
+
+        # haptic_encoder_resnet = haptic_encoder_fenlei(3200)
+        # self.haptic_encoder_resnet = load_model_parameters(haptic_encoder_resnet, '/data1/liuhengfa/serach_haptic/encoder_haptic3_resnet.pth' )
+        # self.haptic_encoder = self.haptic_encoder_resnet.to(device)
+
         self.model_haptic_affine = AffineTransform(input_dim=128)  # 使用resnet分类网络的时候用的256；使用transform的是128
         self.model_haptic_affine = self.model_haptic_affine.to(device)
 
+        self.model_audio_affine = AffineTransform_Audio(input_dim=1024)  # 使用resnet分类网络的时候用的256；使用transform的是128
+        self.model_audio_affine = self.model_audio_affine.to(device)
+
+        #self.model = self.model.to(device)
+        # self.model = self.model.cuda()
+        # # 加载模型权重
+        # self.model.load_state_dict(self._load_state_dict_(MODEL_PATH), strict=True)
 
 
         # 输出路径
@@ -122,14 +145,15 @@ class TrainSaliency(object):
 
         # 定义优化器
 
-        '''下面两行确定触觉编码器是否参与训练'''
+        '''下面两行确定触觉编码器、视觉编码器是否参与训练'''
         # self.optimizer = optim.Adam(
-        #     list(self.model_2.parameters()) + list(self.model_haptic_affine.parameters()) + list(self.haptic_encoder.parameters()),
-        #     lr=1e-5
+        #     list(self.model_2.parameters()) + list(self.model_haptic_affine.parameters())+ list(self.haptic_encoder.parameters()),
+        #     lr=5*1e-5
         # )
         self.optimizer = optim.Adam(
-            list(self.model_2.parameters()) + list(self.model_haptic_affine.parameters())+ list(self.haptic_encoder.parameters()),
-            lr=5*1e-5
+            list(self.model_2.parameters()) + list(self.model_audio_affine.parameters()) + list(
+                self.audio_encoder.parameters()) +list(self.model_haptic_affine.parameters())+ list(self.haptic_encoder.parameters()),
+            lr=5 * 1e-5
         )
         v_num = len(self.video_list)
 
@@ -174,8 +198,12 @@ class TrainSaliency(object):
 
 
         self.model_2.train()
+
         self.haptic_encoder.train()
         self.model_haptic_affine.train()
+
+        self.audio_encoder.train()
+        self.model_audio_affine.train()
 
         epoch_loss = 0.0
         epoch_kl_loss = 0.0
@@ -194,12 +222,17 @@ class TrainSaliency(object):
             print('#############开始加载一个新的视频##############')
             for idx in range(len(video_loader)):  # 对第一个视频里面的第一帧；然后是第二帧，直至达到该视频中的总帧长
                 #print('len(video_loader):', len(video_loader))
-                video_data_equi, video_data_cube, audio_data, gt_salmap, fixation = next(vit)
+                video_data_equi, video_data_cube, audio_data, haptic_data, gt_salmap, fixation = next(vit)
+
+                print('video_data_equi:', video_data_equi.shape)
+                #print('video_data_cube:', video_data_cube.shape)
+                print('audio_data:', audio_data.shape)
+                print('haptic_data:', haptic_data.shape)
 
                 # 将数据转换为tensor并放入GPU
                 video_data_equi = video_data_equi.to(device=device, dtype=torch.float)
                 #video_data_equi = video_data_equi.cuda()
-                #print('video_data_equi:', video_data_equi.shape)  # ([1, 3, 16, 320, 640]) 输入的是16个视频帧，输出的是一个32*40的显著图
+                print('video_data_equi:', video_data_equi.shape)  # ([1, 3, 16, 320, 640]) 输入的是16个视频帧，输出的是一个32*40的显著图
 
                 video_data_cube = video_data_cube.to(device=device, dtype=torch.float)
                 #video_data_cube = video_data_cube.cuda()
@@ -208,40 +241,56 @@ class TrainSaliency(object):
                 然后通过特征的编码；
                 最后执行仿射变换；
                 '''
-                audio_data = audio_data.to(torch.float32) # 这里其实已经是加载的txt的触觉信号了，只是名字没改[b, T, 3200]
+                audio_data = audio_data.to(torch.float32)  # 这里就是听觉信号
                 audio_data = audio_data.to(device=device, dtype=torch.float)
                 #audio_data = audio_data.cuda()
                 #print('audio_data:', audio_data.shape)
 
+                haptic_data = haptic_data.to(torch.float32)  # 这里是加载的txt的触觉信号了，只是名字没改格式是[b, T, 3200]
+                haptic_data = haptic_data.to(device=device, dtype=torch.float)
+                print('haptic_data:', haptic_data.shape)
 
-                '''触觉编码网络的两种方案，尝试了两种风格'''
+                '''编码音频特征'''
+                audio_feature = self.audio_encoder(audio_data)
+                print('audio_feature的维度', audio_feature.shape)  # ([2, 1024] 这里是加载的txt的触觉信号了，只是名字没改格式是[b, T, 3200]，即1024*2
+                audio_out1, audio_out2, audio_out3, audio_out4 = self.model_audio_affine(audio_feature)
+                print('xxx-仿射变换后音频的维度-xxx', audio_out1.shape, audio_out2.shape, audio_out3.shape, audio_out4.shape)
+
+                '''编码触觉特征'''
                 # 方案1
-                haptic_data = self.haptic_encoder(audio_data)  # 旧的使用trasnformer的方法
-
-                '''新的使用resnet的方法'''
-                #方案2
-                # audio_data_last_time = audio_data[:, -1, :]
-                # haptic_data = self.haptic_encoder.penultimate_layer_output(audio_data_last_time)  # 使用resnet的分类网络,为了验证多张的性能这个也修改了
-
+                haptic_data = self.haptic_encoder(haptic_data)  # 使用trasnformer的方法
 
                #print('xxxxx---编码的触觉的特征的维度--xxxxx', haptic_data.shape)  # ([2, 256])
                 haptic_out1, haptic_out2, haptic_out3, haptic_out4 = self.model_haptic_affine(haptic_data)
-
-                #print('xxx-仿射变换后触觉的维度-xxx', haptic_out1.shape, haptic_out2.shape, haptic_out3.shape, haptic_out4.shape)
+                print('xxx-仿射变换后触觉的维度-xxx', haptic_out1.shape, haptic_out2.shape, haptic_out3.shape, haptic_out4.shape)
 
 
                 gt_salmap = gt_salmap.to(device=device, dtype=torch.float)
-
+                #gt_salmap = gt_salmap.cuda()
+                #print('gt_salmap:', gt_salmap.shape)  # ([1, 1,320, 640]) 输入的是16个视频帧，输出的是一个32*40的显著图
 
                 fixation_map = fixation.to(device=device, dtype=torch.float)
-
-
+                #fixation_map = fixation_map.cuda()
+                #print('fixation_map:', fixation_map.shape)  # ([1, 1, 320, 640]) 输入的是16个视频帧，输出的是一个32*40的显著图
+                #print('gt_salmap最大值和最小值:', torch.max(gt_salmap).item(), torch.min(gt_salmap).item())
+                #print('fixation_map最大值和最小值:', torch.max(fixation_map).item(), torch.min(fixation_map).item())
 
                 # 预测显著图
+                #pred_salmap = self.model_2(video_data_equi, random_tensor_y1, random_tensor_y2, random_tensor_y3, random_tensor_4)
+                #pred_salmap = self.model_2(video_data_equi, haptic_out1, haptic_out2, haptic_out3, haptic_out4)
+                pred_salmap = self.model_2(video_data_equi, audio_out1, audio_out2, audio_out3, audio_out4, haptic_out1, haptic_out2, haptic_out3, haptic_out4)
+                print('这个是联合视+音+触觉生成的显著性图')
+                #exit()
+                #pred_salmap = self.model(video_data_equi, video_data_cube, audio_data, self.equator_bias)
 
-                pred_salmap = self.model_2(video_data_equi, haptic_out1, haptic_out2, haptic_out3, haptic_out4)
+                #print('pred_salmap:', pred_salmap.shape)
+
+                # print('gt_salmap:', gt_salmap.shape)
+                # print('pred_salmap最大值和最小值:', torch.max(pred_salmap).item(), torch.min(pred_salmap).item())
 
                 # 计算损失
+                #loss = loss_function_bce(pred_salmap, gt_salmap)
+                #print('loss:', loss)
 
                 loss_kl = kldiv(pred_salmap, gt_salmap)  # 第一个参数是预测的显著图，第二个参数是真实的显著图
 
@@ -258,7 +307,7 @@ class TrainSaliency(object):
                 # 累加损失
                 epoch_loss += loss_overall.cpu().data.numpy()
                 self.optimizer.zero_grad()
-
+                #loss.backward()
                 loss_overall.backward()
                 # 更新参数
                 self.optimizer.step()
@@ -268,6 +317,8 @@ class TrainSaliency(object):
                 epoch_nss_loss += loss_nss.cpu().data.numpy()
 
 
+            # 统计了一共有多少帧图片
+            #print('len(video_loader):', len(video_loader))
             batch_count = batch_count + len(video_loader)
             print('batch_count:', batch_count)
             end = time.time()
@@ -278,6 +329,9 @@ class TrainSaliency(object):
 
             if epoch % 50 == 0:
                 torch.save(self.model_2, OUTPUT + '_my_model_ep' + str(epoch) + '.pkl')  # 这个是视频编码模型,融合模型，以及解码模型
+                torch.save(self.audio_encoder, OUTPUT + '_my_audio_encoder_model_ep' + str(epoch) + '.pkl')
+                torch.save(self.model_audio_affine, OUTPUT + '_my_audio_affine_model_ep' + str(epoch) + '.pkl')
+
                 torch.save(self.haptic_encoder, OUTPUT + '_my_haptic_encoder_model_ep' + str(epoch) + '.pkl')
                 torch.save(self.model_haptic_affine, OUTPUT + '_my_haptic_affine_model_ep' + str(epoch) + '.pkl')
                 print('保存模型成功')
