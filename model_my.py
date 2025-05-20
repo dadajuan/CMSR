@@ -4,7 +4,9 @@ import math
 from swin_transformer import *
 from collections import OrderedDict
 import numpy as np
-
+import torch.nn as nn  # PyTorch神经网络模块
+import torch.nn.functional as F  # 函数式接口
+from torch.autograd import Variable  # 自动梯度计算
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 
@@ -171,6 +173,54 @@ class AffineTransform(nn.Module):
 
             # 全连接层映射通道维度
             x_mapped = self.fc_layers[i](x)  # (batch, C)
+
+            # 添加时间和空间维度
+            x_expanded = x_mapped.unsqueeze(2).unsqueeze(3).unsqueeze(4)  # (batch, C, 1, 1, 1)
+
+            # 重复时间和空间维度
+            x_repeated = x_expanded.repeat(1, 1, T, H, W)  # (batch, C, T, H, W)
+            transformed_features.append(x_repeated)
+
+        return transformed_features[0], transformed_features[1], transformed_features[2], transformed_features[3]
+
+class AffineTransform_Audio(nn.Module):
+    def __init__(self, input_dim=1024):
+        """
+        仿射变换模块
+        :param input_dim: 输入特征的通道维度 (128)
+        """
+        super(AffineTransform_Audio, self).__init__()
+
+        # 固定的目标形状（除 batch_size 外）
+        self.target_shapes = [
+            (96, 8, 56, 96),
+            (192, 8, 28, 48),
+            (384, 8, 14, 24),
+            (768, 8, 7, 12)
+        ]
+
+        # 为每个目标形状创建一个对应的全连接层
+        self.fc_layers = nn.ModuleList([
+            nn.Linear(input_dim, shape[0]) for shape in self.target_shapes  # 映射到目标通道数 C
+        ])
+    def forward(self, x):
+        """
+        前向传播
+        :param x: 输入特征，形状为 (batch, input_dim)
+        :return: 变换后的特征列表，对应目标形状
+        """
+        batch_size = x.size(0)  # 获取 batch_size
+        transformed_features = []
+
+        for i, shape in enumerate(self.target_shapes):
+            C, T, H, W = shape
+            #x = x.squeeze(-1).squeeze(-1)
+            # x = x.squeeze(-1).squeeze(-1)
+            c = x.mean(dim=-1)
+            c = c.squeeze(-1)
+            print('输入映射变换之前的维度', c.shape)
+            # 全连接层映射通道维度
+            x_mapped = self.fc_layers[i](c)  # (batch, C)
 
             # 添加时间和空间维度
             x_expanded = x_mapped.unsqueeze(2).unsqueeze(3).unsqueeze(4)  # (batch, C, 1, 1, 1)
@@ -732,134 +782,87 @@ class SoundNet(nn.Module):
         return x
 
 
-import torch
-from torch import nn
 
 
+class Encoder_Auido_sound(nn.Module):
+    def __init__(self):
+        super(Encoder_Auido_sound, self).__init__()
+        self.soundnet8 = nn.Sequential(  # 序列容器
+            nn.Conv2d(1, 16, (1, 64), (1, 2), (0, 32)),  # 输入单通道音频谱图
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 8), (1, 8)),
+            nn.Conv2d(16, 32, (1, 32), (1, 2), (0, 16)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 8), (1, 8)),
+            nn.Conv2d(32, 64, (1, 16), (1, 2), (0, 8)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, (1, 8), (1, 2), (0, 4)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, (1, 4), (1, 2), (0, 2)),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 4), (1, 4)),
+            nn.Conv2d(256, 512, (1, 4), (1, 2), (0, 2)),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.Conv2d(512, 1024, (1, 4), (1, 2), (0, 2)),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 2))  # 最终输出形状
+        )
+
+    def forward(self, audio):
+        audio_feature = self.soundnet8(audio)
+        return audio_feature
 
 
-if __name__ == '__main__':
+class Encoder_Auido_sound_2(nn.Module):
+    def __init__(self, pretrain_path=None):
+        super(Encoder_Auido_sound_2, self).__init__()
+        self.soundnet8 = nn.Sequential(  # 序列容器
+            nn.Conv2d(1, 16, (1, 64), (1, 2), (0, 32)),  # 输入单通道音频谱图
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 8), (1, 8)),
+            nn.Conv2d(16, 32, (1, 32), (1, 2), (0, 16)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 8), (1, 8)),
+            nn.Conv2d(32, 64, (1, 16), (1, 2), (0, 8)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, (1, 8), (1, 2), (0, 4)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, (1, 4), (1, 2), (0, 2)),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 4), (1, 4)),
+            nn.Conv2d(256, 512, (1, 4), (1, 2), (0, 2)),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.Conv2d(512, 1024, (1, 4), (1, 2), (0, 2)),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 2))  # 最终输出形状
+        )
+        # 如果提供了预训练模型路径，则加载预训练权重
+        if pretrain_path:
+            print(f"Loading pretrained model from {pretrain_path}")
+            pretrain_weights = torch.load(pretrain_path, map_location=torch.device('cpu'))
+            self.soundnet8.load_state_dict(pretrain_weights, strict=False)
 
-    '''测试音频编码网络'''
-    a = torch.rand(2,1,64,1200)
-    model = SoundNet()
-    out = model(a)
-    print(out.shape)  # torch.Size([2, 1024, 1, 75])
-    exit()
-
-
-    '''测试音视触的融合网络'''
-    v = torch.rand(2, 3, 16, 224, 384)
-    a1 = torch.rand(2, 96, 8, 56, 96)
-    a2 = torch.rand(2, 192, 8, 28, 48)
-    a3= torch.rand(2, 384, 8, 14, 24)
-    a4 = torch.rand(2, 768, 8, 7, 12)
-
-    h1 = torch.rand(2, 96, 8, 56, 96)
-    h2 = torch.rand(2, 192, 8, 28, 48)
-    h3 = torch.rand(2, 384, 8, 14, 24)
-    h4 = torch.rand(2, 768, 8, 7, 12)
-
-    model = Video_Audio_Haptic_SaliencyModel()
-    out = model(v, a1, a2, a3, a4, h1, h2, h3, h4)
-    print(out.shape)
-
-    h1 = torch.rand(10, 96, 8, 56, 96)
-    h2 = torch.rand(10, 192, 8, 28, 48)
-    h3 = torch.rand(10, 384, 8, 14, 24)
-    h4 = torch.rand(10, 768, 8, 7, 12)
-
-    a1 = torch.rand(10, 96, 8, 56, 96)
-    a2 = torch.rand(10, 192, 8, 28, 48)
-    a3 = torch.rand(10, 384, 8, 14, 24)
-    a4 = torch.rand(10, 768, 8, 7, 12)
-    model = FusionNetwork()
-    y1, y2, y3, y4 = model(h1, h2, h3, h4, a1, a2, a3, a4)
-
-    print(y1.shape)  # torch.Size([10, 96, 8, 56, 96])
-    print(y2.shape)  # torch.Size([10, 192, 8, 28, 48])
-    print(y3.shape)  # torch.Size([10, 384, 8, 14, 24])
-    print(y4.shape)  # torch.Size([10, 768, 8, 7, 12])
-
-    exit()
-    y1 = torch.rand(10, 96, 8, 56, 96)
-    y2 = torch.rand(10, 192, 8, 28, 48)
-    y3 = torch.rand(10, 384, 8, 14, 24)
-    y4 = torch.rand(10, 768, 8, 7, 12)
-
-    decoder = Decoder_pyramid()
-
-    out = decoder(y4, y3, y2, y1)
-    print(out.shape)
-    exit()
-
-    input_tensor = torch.randn(2, 3, 16, 64, 64)
-    model = haptic_affine()
-    output1, output2, output3, output4 = model(input_tensor)
-
-    print(output1.shape)  # Expected: [1, 96, 8, 56, 96]
-    print(output2.shape)  # Expected: [1, 96, 8, 24, 48]
-    print(output3.shape)  # Expected: [1, 96, 8, 12, 24]
-    print(output4.shape)  # Expected: [1, 96, 8, 6, 12]
-    exit()
-
-
-    y1 = torch.rand(10, 96, 8, 56, 56)
-    y1_haptic = torch.rand(10, 96, 8, 56, 56)
-    fusion_model = cross_attetion_fusion(96)
-    out = fusion_model(y1, y1_haptic)
-    print("out.shape", out.shape)
-
-    exit()
-
-    '''测试原来的decoder模型'''
-    y1 = torch.rand(10, 96, 8, 56, 56)
-    y2 = torch.rand(10, 192, 8, 28, 28)
-    y3 = torch.rand(10, 384, 8, 14, 14)
-    y4 = torch.rand(10, 768, 8, 7, 7)
-    dec_model = DecoderConvUp()
-    out = dec_model(y4, y3, y2, y1)
-    print('out.shape', out.shape)
-    exit()
-
-
-    dec_model = Decoder_pyramid()
-    out = dec_model(y4, y3, y2, y1)
-    print('out.shape', out.shape)
-
-    dummy_x = torch.rand(5, 3, 32, 160, 320)
-    video_encoder = SwinTransformer3D(pretrained=None)
-    x, [y1, y2, y3, y4] = video_encoder(dummy_x) # 4,3,2,1;[10, 768, 16, 7, 7],[10, 384, 16, 14, 14],[10, 192, 16, 28, 28],[10, 96, 16, 56, 56]
-
-
-    '''触觉信号的编码特征'''
-    random_tensor_y1 = torch.rand_like(y1)
-    random_tensor_y2 = torch.rand_like(y2)
-    random_tensor_y3 = torch.rand_like(y3)
-    random_tensor_4 = torch.rand_like(x)
-    model_gen_saliecny = Video_HAPTIC_SaliencyModel()
-    print('random_tensor_y1.shape', random_tensor_y1.shape)
-    print('random_tensor_y2.shape', random_tensor_y2.shape)
-    print('random_tensor_y3.shape', random_tensor_y3.shape)
-    print('random_tensor_4.shape', random_tensor_4.shape)
-    out = model_gen_saliecny(dummy_x, random_tensor_y1, random_tensor_y2, random_tensor_y3, random_tensor_4)
-
-
-    print('out.shape', out.shape)
-
-    #dec_model = Decoder_pyramid()
-    #out = dec_model(x, y3, y2, y1)
+    def forward(self, audio):
+        audio_feature = self.soundnet8(audio)
+        return audio_feature
 
 
 
 
 
-# exit()
-#
-# '''旧的main函数'''
-# if __name__ == '__main__':
-#     model = VideoSaliencyModel()
-#     dummy_x = torch.rand(10, 3, 32, 224, 224)
-#     logits = model(dummy_x)
-#     print('ssss')
-#     print(logits.shape)
+
+
