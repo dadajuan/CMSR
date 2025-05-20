@@ -15,6 +15,8 @@ The directory structure of the dataset is as follow.
 </pre>
 **2. The training and  testing code**
 
+**you can download the initial mmodel weights of the video encoder  from [BaiduWangPan](https://pan.baidu.com/s/1rrnf5JPmYh_rjHPlPNv8zQ?pwd=sih3) or [Google drive](https://drive.google.com/file/d/1N5Tl36ch3fJlzNXWAqSpUL-lAjT1o8VR/view?usp=drive_link) and sound encoder  from  [BaiduWangPan](https://pan.baidu.com/s/11U1gLZH0MGEWJhkQ1oVIHQ?pwd=gxqi) or  [Google drive](https://drive.google.com/file/d/1Kdo-e3eJWPl2apPwpOLE16T5Ux8SguRi/view?usp=drive_link).
+
  
  **if you want to train the model, you need to download the dataset and specify the address of the traing set, then execute the following  instruction
 ```python
