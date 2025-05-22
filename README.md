@@ -1,4 +1,4 @@
-# CMSR
+# CMSP
 the code for cross-modal saliency for the immersive videos
 
 
